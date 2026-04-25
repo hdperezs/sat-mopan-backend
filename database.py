@@ -2,16 +2,21 @@ import os
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
 
-# Lee la variable de entorno DATABASE_URL que configuras en Railway
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 
-# Neon entrega una URL con "postgresql://", SQLAlchemy async necesita "postgresql+asyncpg://"
-ASYNC_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://").replace("?sslmode=require&channel_binding=require", "")
+# Neon usa postgresql://, SQLAlchemy async necesita postgresql+asyncpg://
+ASYNC_URL = DATABASE_URL \
+    .replace("postgresql://", "postgresql+asyncpg://") \
+    .split("?")[0]  # Quitar parametros SSL que asyncpg no entiende
 
 engine = create_async_engine(
     ASYNC_URL,
     echo=False,
-    connect_args={"ssl": True}   # Neon requiere SSL
+    pool_pre_ping=True,    # Verifica conexion antes de usarla
+    pool_recycle=300,      # Recicla conexiones cada 5 minutos
+    pool_size=5,
+    max_overflow=10,
+    connect_args={"ssl": True}
 )
 
 AsyncSessionLocal = async_sessionmaker(
