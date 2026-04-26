@@ -58,9 +58,7 @@ Debe responder:
 | PATCH | `/configuracion` | ✅ JWT | Admin |
 | GET | `/admin/mediciones` | ✅ JWT | Admin |
 
-## Credenciales por defecto
-- **Email:** admin@satmopan.gt
-- **Contraseña:** admin123
+
 
 ## Documentación interactiva
 ```
