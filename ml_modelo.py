@@ -219,9 +219,13 @@ class ModeloRF:
         return {"nivel": nivel_riesgo, "score": score}
 
     def _estimar_lineal(self, nivel, tasa) -> float:
-        if tasa > 0.01 and nivel < U_PREC:
-            return (U_PREC - nivel) / tasa
-        return 9999
+    # Si ya superó precaución, calcula tiempo a emergencia
+    if nivel >= U_PREC and tasa > 0.01 and nivel < U_EMER:
+        return (U_EMER - nivel) / tasa
+    # Si aún no llega a precaución, calcula tiempo a precaución
+    if tasa > 0.01 and nivel < U_PREC:
+        return (U_PREC - nivel) / tasa
+    return 9999
 
     def _interpretar(self, nivel, tasa, acel, riesgo, minutos) -> str:
         nM = round(nivel / 100, 2)
