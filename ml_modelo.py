@@ -3,9 +3,9 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 # Constantes
-U_PREC  = 300.0
-U_ALERT = 500.0
-U_EMER  = 650.0
+U_PREC  = 100.0
+U_ALERT = 200.0
+U_EMER  = 300.0
 
 
 def extraer_features(mediciones: list) -> Optional[dict]:
