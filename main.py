@@ -21,9 +21,6 @@ from schemas import (
 SECRET_KEY         = os.getenv("SECRET_KEY", "sat-mopan-secret-2024")
 ALGORITHM          = "HS256"
 TOKEN_EXPIRE_HOURS = 8
-U_PREC             = 300.0
-U_ALERT            = 500.0
-U_EMER             = 650.0
 
 app = FastAPI(title="SAT Mopán API", version="1.0.0")
 
@@ -88,13 +85,15 @@ async def recibir_medicion(
     result = await db.execute(select(Configuracion).where(Configuracion.id == 1))
     config = result.scalar_one_or_none()
 
-    if config and datos.nivel_cm != 999.0:
+    # Logica invertida: a MENOR distancia = MAYOR peligro
+    # 999 = error del sensor, ignorar
+    if config and datos.nivel_cm < 900.0:
         tipo = None
-        if datos.nivel_cm >= config.umbral_emergencia:
+        if datos.nivel_cm <= config.umbral_emergencia:
             tipo = "emergencia"
-        elif datos.nivel_cm >= config.umbral_alerta:
+        elif datos.nivel_cm <= config.umbral_alerta:
             tipo = "alerta"
-        elif datos.nivel_cm >= config.umbral_precaucion:
+        elif datos.nivel_cm <= config.umbral_precaucion:
             tipo = "precaucion"
 
         if tipo:
@@ -102,7 +101,7 @@ async def recibir_medicion(
                 nivel_activador=datos.nivel_cm,
                 tipo_alerta=tipo,
                 numeros_destinatarios=config.lista_numeros_sms,
-                texto_mensaje=f"SAT MOPÁN [{tipo.upper()}]: Nivel {datos.nivel_cm} cm",
+                texto_mensaje=f"SAT MOPÁN [{tipo.upper()}]: Distancia al agua {datos.nivel_cm} cm",
                 estado_entrega="registrado"
             )
             db.add(alerta)
