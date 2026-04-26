@@ -249,6 +249,12 @@ async def obtener_prediccion(db: AsyncSession = Depends(get_db)):
  
     # Generar predicción
     prediccion = modelo_rf.predecir(features)
+    # Renombrar campo según el umbral activo
+    nivel_actual = mediciones[-1].nivel_cm
+    if nivel_actual >= U_PREC:
+    prediccion["umbral_objetivo"] = "EMERGENCIA (6.5m)"
+    else:
+    prediccion["umbral_objetivo"] = "PRECAUCIÓN (3.0m)"
     prediccion["timestamp"] = mediciones[-1].timestamp.isoformat()
     prediccion["total_mediciones_db"] = len(mediciones)
  
