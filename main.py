@@ -18,12 +18,13 @@ from schemas import (
     TokenOut, UsuarioCreate
 )
 
-# ─── Configuración JWT ────────────────────────────────────────
 SECRET_KEY         = os.getenv("SECRET_KEY", "sat-mopan-secret-2024")
 ALGORITHM          = "HS256"
 TOKEN_EXPIRE_HOURS = 8
+U_PREC             = 300.0
+U_ALERT            = 500.0
+U_EMER             = 650.0
 
-# ─── App ──────────────────────────────────────────────────────
 app = FastAPI(title="SAT Mopán API", version="1.0.0")
 
 app.add_middleware(
@@ -33,7 +34,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ─── Helpers Auth ─────────────────────────────────────────────
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
 def crear_token(email: str) -> str:
@@ -63,15 +63,10 @@ async def get_usuario_actual(
         raise HTTPException(status_code=401, detail="Usuario no encontrado")
     return usuario
 
-# ─── STARTUP ──────────────────────────────────────────────────
 @app.on_event("startup")
 async def startup():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-
-# ═════════════════════════════════════════════════════════════
-#  ENDPOINTS PÚBLICOS — sin autenticación (Arduino puede usar)
-# ═════════════════════════════════════════════════════════════
 
 @app.get("/", tags=["Sistema"])
 async def raiz():
@@ -81,22 +76,18 @@ async def raiz():
 async def salud():
     return {"ok": True}
 
-# ── Recibir medición del Arduino (PÚBLICO - sin JWT) ──────────
 @app.post("/medicion", status_code=201, tags=["Arduino"])
 async def recibir_medicion(
     datos: MedicionCreate,
     db: AsyncSession = Depends(get_db)
 ):
-    # Guardar medición
     nueva = Medicion(**datos.model_dump())
     db.add(nueva)
     await db.flush()
 
-    # Leer umbrales actuales
     result = await db.execute(select(Configuracion).where(Configuracion.id == 1))
     config = result.scalar_one_or_none()
 
-    # Generar alerta si supera un umbral
     if config and datos.nivel_cm != 999.0:
         tipo = None
         if datos.nivel_cm >= config.umbral_emergencia:
@@ -119,7 +110,6 @@ async def recibir_medicion(
     await db.commit()
     return {"ok": True, "id": nueva.id, "nivel_cm": datos.nivel_cm}
 
-# ── Nivel actual (PÚBLICO - para el tablero sin login) ────────
 @app.get("/nivel-actual", response_model=MedicionOut, tags=["Público"])
 async def nivel_actual(db: AsyncSession = Depends(get_db)):
     result = await db.execute(
@@ -130,7 +120,6 @@ async def nivel_actual(db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Sin datos aún")
     return medicion
 
-# ── Historial últimas N mediciones (PÚBLICO) ──────────────────
 @app.get("/historial", response_model=List[MedicionOut], tags=["Público"])
 async def historial(limite: int = 100, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
@@ -138,11 +127,6 @@ async def historial(limite: int = 100, db: AsyncSession = Depends(get_db)):
     )
     return result.scalars().all()
 
-# ═════════════════════════════════════════════════════════════
-#  ENDPOINTS PROTEGIDOS — requieren JWT (solo administrador)
-# ═════════════════════════════════════════════════════════════
-
-# ── Login ─────────────────────────────────────────────────────
 @app.post("/auth/login", response_model=TokenOut, tags=["Auth"])
 async def login(
     form: OAuth2PasswordRequestForm = Depends(),
@@ -158,7 +142,6 @@ async def login(
 
     return {"access_token": crear_token(usuario.email), "token_type": "bearer"}
 
-# ── Alertas (protegido) ───────────────────────────────────────
 @app.get("/alertas", response_model=List[AlertaOut], tags=["Admin"])
 async def listar_alertas(
     limite: int = 50,
@@ -170,7 +153,6 @@ async def listar_alertas(
     )
     return result.scalars().all()
 
-# ── Configuración GET (protegido) ─────────────────────────────
 @app.get("/configuracion", response_model=ConfiguracionOut, tags=["Admin"])
 async def obtener_config(
     db: AsyncSession = Depends(get_db),
@@ -182,7 +164,6 @@ async def obtener_config(
         raise HTTPException(status_code=404, detail="Sin configuración")
     return config
 
-# ── Configuración UPDATE (protegido) ──────────────────────────
 @app.patch("/configuracion", response_model=ConfiguracionOut, tags=["Admin"])
 async def actualizar_config(
     cambios: ConfiguracionUpdate,
@@ -201,7 +182,6 @@ async def actualizar_config(
     await db.refresh(config)
     return config
 
-# ── Historial protegido (todas las mediciones) ────────────────
 @app.get("/admin/mediciones", response_model=List[MedicionOut], tags=["Admin"])
 async def todas_las_mediciones(
     limite: int = 500,
@@ -215,47 +195,31 @@ async def todas_las_mediciones(
 
 @app.get("/prediccion", tags=["ML"])
 async def obtener_prediccion(db: AsyncSession = Depends(get_db)):
-    """
-    Endpoint público que retorna la predicción del modelo
-    Random Forest sobre el estado actual del río.
-    Se reentrena automáticamente con cada consulta si hay
-    suficientes datos nuevos.
-    """
-    # Obtener últimas 100 mediciones para entrenar y predecir
     result = await db.execute(
         select(Medicion)
         .order_by(desc(Medicion.timestamp))
         .limit(100)
     )
     mediciones = list(reversed(result.scalars().all()))
- 
+
     if len(mediciones) < 4:
         return {
             "error": "Insuficientes datos",
             "mensaje": "Se necesitan al menos 4 mediciones para generar una predicción.",
             "n_mediciones": len(mediciones)
         }
- 
-    # Reentrenar si hay suficientes datos
+
     modelo_rf.entrenar(mediciones)
- 
-    # Extraer features de las últimas mediciones
+
     features = extraer_features(mediciones[-20:])
     if features is None:
         return {
             "error": "No se pudieron calcular las características del modelo",
             "n_mediciones": len(mediciones)
         }
- 
-    # Generar predicción
+
     prediccion = modelo_rf.predecir(features)
-    # Renombrar campo según el umbral activo
-    nivel_actual = mediciones[-1].nivel_cm
-    if nivel_actual >= U_PREC:
-    prediccion["umbral_objetivo"] = "EMERGENCIA (6.5m)"
-    else:
-    prediccion["umbral_objetivo"] = "PRECAUCIÓN (3.0m)"
     prediccion["timestamp"] = mediciones[-1].timestamp.isoformat()
     prediccion["total_mediciones_db"] = len(mediciones)
- 
+
     return prediccion
