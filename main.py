@@ -211,3 +211,44 @@ async def todas_las_mediciones(
         select(Medicion).order_by(desc(Medicion.timestamp)).limit(limite)
     )
     return result.scalars().all()
+
+@app.get("/prediccion", tags=["ML"])
+async def obtener_prediccion(db: AsyncSession = Depends(get_db)):
+    """
+    Endpoint público que retorna la predicción del modelo
+    Random Forest sobre el estado actual del río.
+    Se reentrena automáticamente con cada consulta si hay
+    suficientes datos nuevos.
+    """
+    # Obtener últimas 100 mediciones para entrenar y predecir
+    result = await db.execute(
+        select(Medicion)
+        .order_by(desc(Medicion.timestamp))
+        .limit(100)
+    )
+    mediciones = list(reversed(result.scalars().all()))
+ 
+    if len(mediciones) < 4:
+        return {
+            "error": "Insuficientes datos",
+            "mensaje": "Se necesitan al menos 4 mediciones para generar una predicción.",
+            "n_mediciones": len(mediciones)
+        }
+ 
+    # Reentrenar si hay suficientes datos
+    modelo_rf.entrenar(mediciones)
+ 
+    # Extraer features de las últimas mediciones
+    features = extraer_features(mediciones[-20:])
+    if features is None:
+        return {
+            "error": "No se pudieron calcular las características del modelo",
+            "n_mediciones": len(mediciones)
+        }
+ 
+    # Generar predicción
+    prediccion = modelo_rf.predecir(features)
+    prediccion["timestamp"] = mediciones[-1].timestamp.isoformat()
+    prediccion["total_mediciones_db"] = len(mediciones)
+ 
+    return prediccion
